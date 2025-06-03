@@ -48,12 +48,25 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-char rx_data;
+int steps;
+uint8_t buffer[4];
+char RPM;
+char delay;
+char run;
+int idx;
+
+
 int currentSpeed = 1000;
 bool increaseThrottle1200 = 0;
 bool increaseThrottle1400 = 0;
 bool increaseThrottle1600 = 0;
+bool stepsFed = 0;
+bool rpmFed = 0;
+bool delayFed = 0;
+bool running = 1;
+
 uint8_t waveformVal;
+
 
 /* USER CODE END PV */
 
@@ -78,10 +91,10 @@ void sendNextionData(char s[])
     sprintf(cmd, "t0.txt=\"%s\"", s);
 
     // Send the command string
-    HAL_UART_Transmit(&huart1, (uint8_t*)cmd, strlen(cmd), HAL_MAX_DELAY);
+    HAL_UART_Transmit(&huart1, (uint8_t*)cmd, strlen(cmd), 10);
 
     // Send the end command
-    HAL_UART_Transmit(&huart1, end_cmd, 3, HAL_MAX_DELAY);
+    HAL_UART_Transmit(&huart1, end_cmd, 3, 10);
 }
 
 void sendWaveform(uint8_t waveform_id, uint8_t channel, uint8_t value)
@@ -90,8 +103,8 @@ void sendWaveform(uint8_t waveform_id, uint8_t channel, uint8_t value)
     uint8_t end_cmd[] = {0xFF, 0xFF, 0xFF};
 
     sprintf(cmd, "add %d,%d,%d", waveform_id, channel, value);
-    HAL_UART_Transmit(&huart1, (uint8_t*)cmd, strlen(cmd), HAL_MAX_DELAY);
-    HAL_UART_Transmit(&huart1, end_cmd, 3, HAL_MAX_DELAY);
+    HAL_UART_Transmit(&huart1, (uint8_t*)cmd, strlen(cmd), 10);
+    HAL_UART_Transmit(&huart1, end_cmd, 3, 10);
 }
 
 
@@ -100,7 +113,25 @@ void ESC_SetThrottle(uint16_t pulse_us)
     if(pulse_us < 1000) pulse_us = 1000;
     if(pulse_us > 2000) pulse_us = 2000;
 
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse_us);
+    if(pulse_us > currentSpeed)
+    {
+    	for(int i = currentSpeed; i<=pulse_us; i+=25)
+    	{
+    		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, i);
+    		waveformVal = (uint8_t)(((i - 1000) * 255) / 1000);
+    		sendWaveform(2, 0, waveformVal);
+    		HAL_Delay(25);
+    	}
+    }
+    else
+    {
+    	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse_us);
+    	waveformVal = (uint8_t)(((pulse_us - 1000) * 255) / 1000);
+    	sendWaveform(2, 0, waveformVal);
+    	//sendWaveform(2, 1, pulse_us);
+    }
+    currentSpeed = pulse_us;
+
 }
 /* USER CODE END 0 */
 
@@ -136,60 +167,127 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart1, &rx_data, 1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  ESC_SetThrottle(1000);
+  HAL_Delay(2000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  //1100 init
-  ESC_SetThrottle(1000);
-  HAL_Delay(2000);
+
   while (1)
   {
     /* USER CODE END WHILE */
-	  if(increaseThrottle1200)
-	  {
-		  for(int i = currentSpeed; i <= 1200; i += 25)
-		  {
-			ESC_SetThrottle(i);
-			waveformVal = (uint8_t)(((i - 1000) * 255) / 1000);
-			sendWaveform(6, 0, waveformVal);
-			HAL_Delay(20);
-		  }
-		  ESC_SetThrottle(1200);
-		  currentSpeed = 1200;
-		  increaseThrottle1200 = 0;
-	  }
-	  else if(increaseThrottle1400)
-	  {
-		  for(int i = currentSpeed; i <= 1400; i += 25)
-		  {
-			ESC_SetThrottle(i);
-			waveformVal = (uint8_t)(((i - 1000) * 255) / 1000);
-			sendWaveform(6, 0, waveformVal);
-			HAL_Delay(20);
-		  }
-		  ESC_SetThrottle(1400);
-		  currentSpeed = 1400;
-		  increaseThrottle1400 = 0;
-	  }
-	  else if(increaseThrottle1600)
-	  {
-		  for(int i = currentSpeed; i <= 1600; i += 25)
-		  {
-			ESC_SetThrottle(i);
-			waveformVal = (uint8_t)(((i - 1000) * 255) / 1000);
-			sendWaveform(6, 0, waveformVal);
-			HAL_Delay(20);
-		  }
-		  ESC_SetThrottle(1600);
-		  currentSpeed = 1600;
-		  increaseThrottle1600 = 0;
-	  }
-	  waveformVal = (uint8_t)(((currentSpeed - 1000) * 255) / 1000);
-	  sendWaveform(6, 0, waveformVal);
+
     /* USER CODE BEGIN 3 */
+	  while(!stepsFed)
+	  {
+		  if (HAL_UART_Receive(&huart1, buffer, 4, 10) == HAL_OK)
+		  {
+			  steps = buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
+			  HAL_UART_Transmit(&huart2, buffer, 4, 10);
+		  	  stepsFed = 1;
+		  }
+	  }
+
+	  char RPMs[steps];
+	  char delays[steps];
+
+	  int speeds[steps];
+	  int times[steps];
+
+	  while(!rpmFed)
+	  {
+		  if(HAL_UART_Receive(&huart1, &RPM, 1, 10) == HAL_OK)
+		  {
+			  RPMs[idx++] = RPM;
+			  HAL_UART_Transmit(&huart2, &RPM, 1, 10);
+			  if(idx == steps)
+			  {
+				  rpmFed = 1;
+				  idx = 0;
+			  }
+		  }
+	  }
+
+	  while(!delayFed)
+	  {
+		  if(HAL_UART_Receive(&huart1, &delay, 1, 10) == HAL_OK)
+		  {
+			  delays[idx++] = delay;
+			  HAL_UART_Transmit(&huart2, &delay, 1, 10);
+			  if(idx == steps)
+			  {
+				  delayFed = 1;
+				  idx = 0;
+			  }
+		  }
+	  }
+
+	  for(int i = 0; i<steps; i++)
+	  {
+		  if(RPMs[i] == '1')
+		  {
+			  speeds[i] = 1200;
+		  }
+		  else if(RPMs[i] == '2')
+		  {
+			  speeds[i] = 1400;
+		  }
+		  else if(RPMs[i] == '3')
+		  {
+			  speeds[i] = 1600;
+		  }
+		  else if(RPMs[i] == '4')
+		  {
+			  speeds[i] = 1800;
+		  }
+
+	  }
+
+	  for(int i = 0; i<steps; i++)
+	  {
+		  if(delays[i] == '1')
+		  {
+			  times[i] = 1000;
+		  }
+		  else if(delays[i] == '2')
+		  {
+			  times[i] = 2000;
+		  }
+		  else if(delays[i] == '3')
+		  {
+			  times[i] = 3000;
+		  }
+		  else if(delays[i] == '4')
+		  {
+			  times[i] = 4000;
+		  }
+	  }
+
+	  while(running)
+	  {
+		  if(HAL_UART_Receive(&huart1, &run, 1, 10) == HAL_OK)
+		  {
+			  HAL_UART_Transmit(&huart2, &run, 1, 10);
+			  if(run == 'R')
+			  {
+				  for(int i = 0; i < steps; i++)
+				  {
+					  ESC_SetThrottle(speeds[i]);
+					  waveformVal = (uint8_t)(((speeds[i] - 1000) * 255) / 1000);
+					  sendWaveform(2, 0, waveformVal);
+					  HAL_Delay(times[i]);
+				  }
+			  }
+			  running = 0;
+		  }
+	  }
+
+	  ESC_SetThrottle(1000);
+
+
+
   }
   /* USER CODE END 3 */
 }
@@ -396,70 +494,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  /* Prevent unused argument(s) compilation warning */
-  UNUSED(huart);
 
-  /* NOTE : This function should not be modified, when the callback is needed,
-            the HAL_UART_RxCpltCallback can be implemented in the user file.
-   */
-
-  if(rx_data == '0')
-  {
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 1);
-	  sendNextionData("1000");
-	  ESC_SetThrottle(1000);
-	  currentSpeed = 1000;
-  }
-  else if(rx_data == '1')
-  {
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 0);
-	  sendNextionData("1200");
-	  if(currentSpeed < 1200)
-	  {
-		  increaseThrottle1200 = 1;
-	  }
-	  else
-	  {
-		  ESC_SetThrottle(1200);
-		  currentSpeed = 1200;
-	  }
-  }
-  else if(rx_data == '2')
-  {
-  	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 0);
-  	  sendNextionData("1400");
-  	  if(currentSpeed < 1400)
-	  {
-		  increaseThrottle1400 = 1;
-	  }
-	  else
-	  {
-		  ESC_SetThrottle(1400);
-		  currentSpeed = 1400;
-	  }
-  }
-  else if(rx_data == '3')
-  {
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 0);
-	  sendNextionData("1600");
-	  if(currentSpeed < 1600)
-	  {
-		  increaseThrottle1600 = 1;
-	  }
-	  else
-	  {
-		  ESC_SetThrottle(1600);
-		  currentSpeed = 1600;
-	  }
-  }
-
-  HAL_UART_Transmit(&huart2, &rx_data, 1, 10);
-  HAL_UART_Receive_IT(&huart1, &rx_data, 1);   // Restart reception
-
-
-}
 /* USER CODE END 4 */
 
 /**
