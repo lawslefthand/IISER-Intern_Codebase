@@ -53,17 +53,11 @@ uint8_t buffer[4];
 char RPM;
 char delay;
 char run;
+char restart;
 int idx;
 
 
 int currentSpeed = 1000;
-bool increaseThrottle1200 = 0;
-bool increaseThrottle1400 = 0;
-bool increaseThrottle1600 = 0;
-bool stepsFed = 0;
-bool rpmFed = 0;
-bool delayFed = 0;
-bool running = 1;
 
 uint8_t waveformVal;
 
@@ -180,13 +174,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  while(!stepsFed)
+	  while(1)
 	  {
 		  if (HAL_UART_Receive(&huart1, buffer, 4, 10) == HAL_OK)
 		  {
 			  steps = buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
 			  HAL_UART_Transmit(&huart2, buffer, 4, 10);
-		  	  stepsFed = 1;
+		  	  break;
 		  }
 	  }
 
@@ -196,7 +190,7 @@ int main(void)
 	  int speeds[steps];
 	  int times[steps];
 
-	  while(!rpmFed)
+	  while(1)
 	  {
 		  if(HAL_UART_Receive(&huart1, &RPM, 1, 10) == HAL_OK)
 		  {
@@ -204,13 +198,13 @@ int main(void)
 			  HAL_UART_Transmit(&huart2, &RPM, 1, 10);
 			  if(idx == steps)
 			  {
-				  rpmFed = 1;
 				  idx = 0;
+				  break;
 			  }
 		  }
 	  }
 
-	  while(!delayFed)
+	  while(1)
 	  {
 		  if(HAL_UART_Receive(&huart1, &delay, 1, 10) == HAL_OK)
 		  {
@@ -218,8 +212,8 @@ int main(void)
 			  HAL_UART_Transmit(&huart2, &delay, 1, 10);
 			  if(idx == steps)
 			  {
-				  delayFed = 1;
 				  idx = 0;
+				  break;
 			  }
 		  }
 	  }
@@ -265,7 +259,7 @@ int main(void)
 		  }
 	  }
 
-	  while(running)
+	  while(1)
 	  {
 		  if(HAL_UART_Receive(&huart1, &run, 1, 10) == HAL_OK)
 		  {
@@ -275,19 +269,29 @@ int main(void)
 				  for(int i = 0; i < steps; i++)
 				  {
 					  ESC_SetThrottle(speeds[i]);
-					  waveformVal = (uint8_t)(((speeds[i] - 1000) * 255) / 1000);
+					  waveformVal = (uint8_t)(((currentSpeed - 1000) * 255) / 1000);
 					  sendWaveform(2, 0, waveformVal);
 					  HAL_Delay(times[i]);
+					  sendWaveform(2, 0, waveformVal);
 				  }
 			  }
-			  running = 0;
+			  break;
 		  }
 	  }
 
 	  ESC_SetThrottle(1000);
 
-
-
+	  while(1)
+	  {
+		  if(HAL_UART_Receive(&huart1, &restart, 1, 10) == HAL_OK)
+		  {
+			  HAL_UART_Transmit(&huart2, &restart, 1, 10);
+			  if(restart == 'T')
+			  {
+				  break;
+			  }
+		  }
+	  }
   }
   /* USER CODE END 3 */
 }
