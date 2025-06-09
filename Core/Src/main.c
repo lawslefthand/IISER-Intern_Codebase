@@ -18,11 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "string.h"
-#include "stdio.h"
-#include <stdbool.h>
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
 
 /* USER CODE END Includes */
 
@@ -48,13 +49,17 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+char confirm;
 int steps;
 uint8_t buffer[4];
-char RPM;
-char delay;
+uint8_t RPM[4];
+uint8_t delay[4];
+int speed[4];
+int time[4];
 char run;
 char restart;
-int idx;
+int j = 0;
+int num=0;
 
 
 int currentSpeed = 1000;
@@ -125,7 +130,19 @@ void ESC_SetThrottle(uint16_t pulse_us)
     	//sendWaveform(2, 1, pulse_us);
     }
     currentSpeed = pulse_us;
+}
 
+void flushUart1(void)
+{
+    uint8_t d;
+    while (HAL_UART_Receive(&huart1, &d, 1, 1) == HAL_OK) { }
+}
+
+void transmitInt(int n)
+{
+	char msg[20];
+	sprintf(msg, "%d\r\n", n);
+	HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 10);
 }
 /* USER CODE END 0 */
 
@@ -169,129 +186,116 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  while (1)
+  while(1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 	  while(1)
 	  {
-		  if (HAL_UART_Receive(&huart1, buffer, 4, 10) == HAL_OK)
+		  if(HAL_UART_Receive(&huart1, &confirm, 1, 500) == HAL_OK)
 		  {
-			  steps = buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
-			  HAL_UART_Transmit(&huart2, buffer, 4, 10);
-		  	  break;
+			  if(confirm == 'C')
+			  {
+				  HAL_UART_Transmit(&huart2, &confirm, 1, 10);
+				  flushUart1();
+				  break;
+			  }
+			  else
+			  {
+				  HAL_UART_Transmit(&huart2, &confirm, 1, 10);
+				  flushUart1();
+				  continue;
+			  }
 		  }
 	  }
 
-	  char RPMs[steps];
-	  char delays[steps];
+
+	  while(1)
+	  {
+		  if(HAL_UART_Receive(&huart1, buffer, 4, 500) == HAL_OK)
+		  {
+			  steps = buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
+			  flushUart1();
+			  transmitInt(steps);
+			  break;
+		  }
+	  }
 
 	  int speeds[steps];
 	  int times[steps];
 
-	  while(1)
+	  for(int i=0; i<steps; i++)
 	  {
-		  if(HAL_UART_Receive(&huart1, &RPM, 1, 10) == HAL_OK)
+		  j = 0;
+		  while(j<4)
 		  {
-			  RPMs[idx++] = RPM;
-			  HAL_UART_Transmit(&huart2, &RPM, 1, 10);
-			  if(idx == steps)
+			  if(HAL_UART_Receive(&huart1, RPM, 4, HAL_MAX_DELAY) == HAL_OK)
 			  {
-				  idx = 0;
-				  break;
+				  int rec = RPM[0] | (RPM[1] << 8) | (RPM[2] << 16) | (RPM[3] << 24);
+				  speed[j] = rec;
+				  transmitInt(rec);
+				  flushUart1();
+				  j++;
 			  }
 		  }
-	  }
 
-	  while(1)
-	  {
-		  if(HAL_UART_Receive(&huart1, &delay, 1, 10) == HAL_OK)
+		  num = 1000*speed[0]+100*speed[1]+10*speed[2]+speed[3];
+		  transmitInt(num);
+		  speeds[i] = num;
+		  num=0;
+		  j = 0;
+
+		  while(j<4)
 		  {
-			  delays[idx++] = delay;
-			  HAL_UART_Transmit(&huart2, &delay, 1, 10);
-			  if(idx == steps)
+			  if(HAL_UART_Receive(&huart1, delay, 4, HAL_MAX_DELAY) == HAL_OK)
 			  {
-				  idx = 0;
-				  break;
+				  int rec = delay[0] | (delay[1] << 8) | (delay[2] << 16) | (delay[3] << 24);
+				  time[j] = rec;
+				  transmitInt(rec);
+				  flushUart1();
+				  j++;
 			  }
 		  }
-	  }
-
-	  for(int i = 0; i<steps; i++)
-	  {
-		  if(RPMs[i] == '1')
-		  {
-			  speeds[i] = 1200;
-		  }
-		  else if(RPMs[i] == '2')
-		  {
-			  speeds[i] = 1400;
-		  }
-		  else if(RPMs[i] == '3')
-		  {
-			  speeds[i] = 1600;
-		  }
-		  else if(RPMs[i] == '4')
-		  {
-			  speeds[i] = 1800;
-		  }
-
-	  }
-
-	  for(int i = 0; i<steps; i++)
-	  {
-		  if(delays[i] == '1')
-		  {
-			  times[i] = 1000;
-		  }
-		  else if(delays[i] == '2')
-		  {
-			  times[i] = 2000;
-		  }
-		  else if(delays[i] == '3')
-		  {
-			  times[i] = 3000;
-		  }
-		  else if(delays[i] == '4')
-		  {
-			  times[i] = 4000;
-		  }
+		  num = 1000*time[0]+100*time[1]+10*time[2]+time[3];
+		  transmitInt(num);
+		  times[i] = num;
+		  num=0;
 	  }
 
 	  while(1)
 	  {
-		  if(HAL_UART_Receive(&huart1, &run, 1, 10) == HAL_OK)
+		  if(HAL_UART_Receive(&huart1, &run, 1, 500) == HAL_OK)
 		  {
 			  HAL_UART_Transmit(&huart2, &run, 1, 10);
+			  flushUart1();
 			  if(run == 'R')
 			  {
 				  for(int i = 0; i < steps; i++)
 				  {
 					  ESC_SetThrottle(speeds[i]);
-					  waveformVal = (uint8_t)(((currentSpeed - 1000) * 255) / 1000);
-					  sendWaveform(2, 0, waveformVal);
-					  HAL_Delay(times[i]);
-					  sendWaveform(2, 0, waveformVal);
+					  waveformVal = (uint8_t)(((speeds[i] - 1000) * 255) / 1000);
+					  uint32_t duration = times[i];
+					  uint32_t interval = 50;
+					  uint32_t count = duration / interval;
+
+					  for (uint32_t j = 0; j < count; j++)
+					  {
+					      sendWaveform(2, 0, waveformVal);
+					      HAL_Delay(interval);
+					  }
 				  }
+				  ESC_SetThrottle(1000);
 			  }
-			  break;
-		  }
-	  }
-
-	  ESC_SetThrottle(1000);
-
-	  while(1)
-	  {
-		  if(HAL_UART_Receive(&huart1, &restart, 1, 10) == HAL_OK)
-		  {
-			  HAL_UART_Transmit(&huart2, &restart, 1, 10);
-			  if(restart == 'T')
+			  if(run == 'T')
 			  {
 				  break;
 			  }
 		  }
 	  }
+	  currentSpeed = 1000;
+	  ESC_SetThrottle(1000);
+	  flushUart1();
   }
   /* USER CODE END 3 */
 }
@@ -362,7 +366,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 15;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 20000;
+  htim2.Init.Period = 19999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
