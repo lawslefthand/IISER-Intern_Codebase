@@ -43,23 +43,27 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+
 TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-char confirm;
+
+char choice;
+char preset;
 int steps;
 uint8_t buffer[4];
 uint8_t RPM[4];
 uint8_t delay[4];
+int j = 0;
+int num=0;
 int speed[4];
 int time[4];
 char run;
-char restart;
-int j = 0;
-int num=0;
+
 
 
 int currentSpeed = 1000;
@@ -75,6 +79,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -177,6 +182,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USART1_UART_Init();
   MX_TIM2_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   ESC_SetThrottle(1000);
@@ -193,109 +199,134 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	  while(1)
 	  {
-		  if(HAL_UART_Receive(&huart1, &confirm, 1, 500) == HAL_OK)
+		  if(HAL_UART_Receive(&huart1, &choice, 1, HAL_MAX_DELAY) == HAL_OK)
 		  {
-			  if(confirm == 'C')
+			  if(choice == 'P')
 			  {
-				  HAL_UART_Transmit(&huart2, &confirm, 1, 10);
+				  HAL_UART_Transmit(&huart2, &choice, 1, 10);
+				  flushUart1();
+				  break;
+
+			  }
+			  else if(choice == 'N')
+			  {
+				  HAL_UART_Transmit(&huart2, &choice, 1, 10);
 				  flushUart1();
 				  break;
 			  }
-			  else
-			  {
-				  HAL_UART_Transmit(&huart2, &confirm, 1, 10);
-				  flushUart1();
-				  continue;
-			  }
 		  }
 	  }
 
-
-	  while(1)
+	  if(choice == 'N')
 	  {
-		  if(HAL_UART_Receive(&huart1, buffer, 4, 500) == HAL_OK)
+		  while(1)
 		  {
-			  steps = buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
-			  flushUart1();
-			  transmitInt(steps);
-			  break;
-		  }
-	  }
-
-	  int speeds[steps];
-	  int times[steps];
-
-	  for(int i=0; i<steps; i++)
-	  {
-		  j = 0;
-		  while(j<4)
-		  {
-			  if(HAL_UART_Receive(&huart1, RPM, 4, HAL_MAX_DELAY) == HAL_OK)
+			  if(HAL_UART_Receive(&huart1, buffer, 4, HAL_MAX_DELAY) == HAL_OK)
 			  {
-				  int rec = RPM[0] | (RPM[1] << 8) | (RPM[2] << 16) | (RPM[3] << 24);
-				  speed[j] = rec;
-				  transmitInt(rec);
+				  steps = buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
 				  flushUart1();
-				  j++;
+				  transmitInt(steps);
+				  break;
 			  }
 		  }
 
-		  num = 1000*speed[0]+100*speed[1]+10*speed[2]+speed[3];
-		  transmitInt(num);
-		  speeds[i] = num;
-		  num=0;
-		  j = 0;
+		  int speeds[steps];
+		  int times[steps];
 
-		  while(j<4)
+		  for(int i=0; i<steps; i++)
 		  {
-			  if(HAL_UART_Receive(&huart1, delay, 4, HAL_MAX_DELAY) == HAL_OK)
+			  j = 0;
+			  while(j<4)
 			  {
-				  int rec = delay[0] | (delay[1] << 8) | (delay[2] << 16) | (delay[3] << 24);
-				  time[j] = rec;
-				  transmitInt(rec);
-				  flushUart1();
-				  j++;
-			  }
-		  }
-		  num = 1000*time[0]+100*time[1]+10*time[2]+time[3];
-		  transmitInt(num);
-		  times[i] = num;
-		  num=0;
-	  }
-
-	  while(1)
-	  {
-		  if(HAL_UART_Receive(&huart1, &run, 1, 500) == HAL_OK)
-		  {
-			  HAL_UART_Transmit(&huart2, &run, 1, 10);
-			  flushUart1();
-			  if(run == 'R')
-			  {
-				  for(int i = 0; i < steps; i++)
+				  if(HAL_UART_Receive(&huart1, RPM, 4, HAL_MAX_DELAY) == HAL_OK)
 				  {
-					  ESC_SetThrottle(speeds[i]);
-					  waveformVal = (uint8_t)(((speeds[i] - 1000) * 255) / 1000);
-					  uint32_t duration = times[i];
-					  uint32_t interval = 50;
-					  uint32_t count = duration / interval;
-
-					  for (uint32_t j = 0; j < count; j++)
-					  {
-					      sendWaveform(2, 0, waveformVal);
-					      HAL_Delay(interval);
-					  }
+					  int rec = RPM[0] | (RPM[1] << 8) | (RPM[2] << 16) | (RPM[3] << 24);
+					  speed[j] = rec;
+					  transmitInt(rec);
+					  flushUart1();
+					  j++;
 				  }
-				  ESC_SetThrottle(1000);
 			  }
-			  if(run == 'T')
+
+			  num = 1000*speed[0]+100*speed[1]+10*speed[2]+speed[3];
+			  transmitInt(num);
+			  speeds[i] = num;
+			  num=0;
+			  j = 0;
+
+			  while(j<4)
 			  {
-				  break;
+				  if(HAL_UART_Receive(&huart1, delay, 4, HAL_MAX_DELAY) == HAL_OK)
+				  {
+					  int rec = delay[0] | (delay[1] << 8) | (delay[2] << 16) | (delay[3] << 24);
+					  time[j] = rec;
+					  transmitInt(rec);
+					  flushUart1();
+					  j++;
+				  }
+			  }
+			  num = 1000*time[0]+100*time[1]+10*time[2]+time[3];
+			  transmitInt(num);
+			  times[i] = num;
+			  num=0;
+		  }
+
+		  while(1)
+		  {
+			  if(HAL_UART_Receive(&huart1, &run, 1, 500) == HAL_OK)
+			  {
+				  HAL_UART_Transmit(&huart2, &run, 1, 10);
+				  flushUart1();
+				  if(run == 'R')
+				  {
+					  for(int i = 0; i < steps; i++)
+					  {
+						  ESC_SetThrottle(speeds[i]);
+						  waveformVal = (uint8_t)(((speeds[i] - 1000) * 255) / 1000);
+						  uint32_t duration = times[i];
+						  uint32_t interval = 50;
+						  uint32_t count = duration / interval;
+
+						  for (uint32_t j = 0; j < count; j++)
+						  {
+							  sendWaveform(2, 0, waveformVal);
+							  HAL_Delay(interval);
+						  }
+					  }
+					  ESC_SetThrottle(1000);
+				  }
+				  if(run == 'T')
+				  {
+					  break;
+				  }
+			  }
+		  }
+		  currentSpeed = 1000;
+		  ESC_SetThrottle(1000);
+		  flushUart1();
+	  }
+	  else if(choice == 'P')
+	  {
+		  while(1)
+		  {
+			  if(HAL_UART_Receive(&huart1, &preset, 1, 500) == HAL_OK)
+			  {
+				  switch(preset)
+				  {
+					case '1': break;
+					case '2': break;
+					case '3': break;
+					case '4': break;
+					case '5': break;
+					case '6': break;
+					case '7': break;
+					case '8': break;
+					case '9': break;
+					case '10': break;
+				  }
 			  }
 		  }
 	  }
-	  currentSpeed = 1000;
-	  ESC_SetThrottle(1000);
-	  flushUart1();
   }
   /* USER CODE END 3 */
 }
@@ -342,6 +373,54 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x00303D5B;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
@@ -486,6 +565,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
